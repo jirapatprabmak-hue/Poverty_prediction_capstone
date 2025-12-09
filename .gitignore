@@ -4,6 +4,10 @@ Dataset/
 # กันเหนียว เผื่อมีไฟล์ csv หลุดออกมาข้างนอก
 *.csv
 
+# Virtual Environment
+venv/
+env/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
