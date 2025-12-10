@@ -16,7 +16,8 @@
         button:hover { background-color: #218838; }
         #mockDataBtn { background-color: #17a2b8; margin-top: 10px; }
         #mockDataBtn:hover { background-color: #138496; }
-        #result { margin-top: 20px; padding: 20px; text-align: center; font-size: 1.5em; font-weight: bold; color: #007bff; border-top: 2px solid #eee; display: none; }
+        #result { margin-top: 20px; padding: 20px; text-align: center; font-size: 1.5em; font-weight: bold; color: #007bff; border-top: 2px solid #eee; display: none; border-radius: 4px; background-color: #f0f8ff; }
+        #predictBtn { display: none; }
     </style>
 </head>
 <body>
@@ -29,7 +30,7 @@
         <div class="form-grid" id="formInputs">
             </div>
         <button type="button" id="mockDataBtn">🎲 สุ่มข้อมูลทดสอบ (Random Mock Data)</button>
-        <button type="submit">ทำนายผล (Predict)</button>
+        <button type="submit" id="predictBtn">ทำนายผล (Predict)</button>
     </form>
 
     <div id="result"></div>
@@ -44,6 +45,10 @@
     const featuresList = {{ features | tojson }}; 
 
     const formContainer = document.getElementById('formInputs');
+    
+    // Debounce timer
+    let debounceTimer = null;
+    let isLoading = false;
     
     // Feature ranges for random data generation
     const featureRanges = {
@@ -68,6 +73,18 @@
                 <input type="number" step="any" name="${feat}" id="${feat}" placeholder="0">
             `;
             formContainer.appendChild(div);
+            
+            // Add real-time prediction on input change with debouncing
+            const input = div.querySelector('input');
+            input.addEventListener('input', function() {
+                // Clear previous timer
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+                
+                // Set new timer - only predict after 500ms of no changes
+                debounceTimer = setTimeout(makePrediction, 500);
+            });
         });
     } else {
         formContainer.innerHTML = '<p>ไม่พบรายชื่อ Feature กรุณารันผ่าน Flask Server</p>';
@@ -91,6 +108,9 @@
     });
 
     async function makePrediction() {
+        // Prevent multiple simultaneous requests
+        if (isLoading) return;
+        
         const data = {};
         featuresList.forEach(feat => {
             const input = document.getElementById(feat);
@@ -100,6 +120,7 @@
         });
 
         const resultDiv = document.getElementById('result');
+        isLoading = true;
         resultDiv.style.display = 'block';
         resultDiv.innerText = 'กำลังประมวลผล...';
 
@@ -112,13 +133,15 @@
             const result = await response.json();
             
             if (result.poverty_probability !== undefined) {
-                const prob = (result.poverty_probability * 100).toFixed(2);
+                const prob = result.poverty_probability.toFixed(2);
                 resultDiv.innerHTML = `ความน่าจะเป็นที่จะยากจน: <span style="color:red">${prob}%</span>`;
             } else {
                 resultDiv.innerText = 'Error: ' + (result.error || 'Unknown error');
             }
         } catch (err) {
             resultDiv.innerText = 'Error connecting to server';
+        } finally {
+            isLoading = false;
         }
     }
 
