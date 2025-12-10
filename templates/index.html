@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poverty Prediction System</title>
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f4f7f6; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
+        .form-group { display: flex; flex-direction: column; }
+        label { margin-bottom: 5px; font-size: 0.9em; color: #666; }
+        input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        button { grid-column: 1 / -1; margin-top: 20px; padding: 15px; background-color: #28a745; color: white; border: none; border-radius: 4px; font-size: 1.2em; cursor: pointer; }
+        button:hover { background-color: #218838; }
+        #mockDataBtn { background-color: #17a2b8; margin-top: 10px; }
+        #mockDataBtn:hover { background-color: #138496; }
+        #result { margin-top: 20px; padding: 20px; text-align: center; font-size: 1.5em; font-weight: bold; color: #007bff; border-top: 2px solid #eee; display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>ระบบทำนายความยากจน (Poverty Prediction)</h1>
+    <p style="text-align: center;">กรอกข้อมูล Feature ด้านล่างเพื่อทำนายความน่าจะเป็น</p>
+    
+    <form id="predictForm">
+        <div class="form-grid" id="formInputs">
+            </div>
+        <button type="button" id="mockDataBtn">🎲 สุ่มข้อมูลทดสอบ (Random Mock Data)</button>
+        <button type="submit">ทำนายผล (Predict)</button>
+    </form>
+
+    <div id="result"></div>
+</div>
+
+<script>
+    // รับ feature names จาก Backend (ผ่าน Jinja2 template) หรือใส่แบบ Manual ถ้าเปิดไฟล์ตรงๆ
+    // ในที่นี้จะสมมติว่า Backend ส่งมา หรือโหลดจากไฟล์ json ได้
+    // เพื่อให้ HTML นี้ทำงานได้เบื้องต้น ผมจะเขียน Script ให้มันอ่าน features จากตัวแปรที่ render มา
+    
+    // ** หมายเหตุ: ถ้าไม่รันผ่าน Flask ให้แก้ featuresList เป็น Array ของชื่อ column เอง **
+    const featuresList = {{ features | tojson }}; 
+
+    const formContainer = document.getElementById('formInputs');
+    
+    // Feature ranges for random data generation
+    const featureRanges = {
+        'education_level': [0, 3],           // 0-3 (categorical)
+        'is_urban': [0, 1],                  // 0-1 (binary)
+        'phone_technology': [0, 3],          // 0-3 (categorical)
+        'can_use_internet': [0, 1],          // 0-1 (binary)
+        'can_text': [0, 1],                  // 0-1 (binary)
+        'num_financial_activities_last_year': [0, 10],  // 0-10 (count)
+        'formal_savings': [0, 1],            // 0-1 (binary)
+        'phone_ownership': [0, 2],           // 0-2 (categorical)
+        'advanced_phone_use': [0, 1],        // 0-1 (binary)
+        'active_bank_user': [0, 1]           // 0-1 (binary)
+    };
+
+    if (featuresList && featuresList.length > 0) {
+        featuresList.forEach(feat => {
+            const div = document.createElement('div');
+            div.className = 'form-group';
+            div.innerHTML = `
+                <label for="${feat}">${feat}</label>
+                <input type="number" step="any" name="${feat}" id="${feat}" placeholder="0">
+            `;
+            formContainer.appendChild(div);
+        });
+    } else {
+        formContainer.innerHTML = '<p>ไม่พบรายชื่อ Feature กรุณารันผ่าน Flask Server</p>';
+    }
+
+    // Mock Data Button Handler
+    document.getElementById('mockDataBtn').addEventListener('click', async function() {
+        featuresList.forEach(feat => {
+            const input = document.getElementById(feat);
+            if (input && featureRanges[feat]) {
+                const [min, max] = featureRanges[feat];
+                // Generate random value within range
+                const randomValue = Math.random() * (max - min) + min;
+                // Round to integers for all features since they're all categorical or binary
+                input.value = Math.round(randomValue);
+            }
+        });
+        
+        // Auto-predict after generating mock data
+        await makePrediction();
+    });
+
+    async function makePrediction() {
+        const data = {};
+        featuresList.forEach(feat => {
+            const input = document.getElementById(feat);
+            if (input) {
+                data[feat] = input.value;
+            }
+        });
+
+        const resultDiv = document.getElementById('result');
+        resultDiv.style.display = 'block';
+        resultDiv.innerText = 'กำลังประมวลผล...';
+
+        try {
+            const response = await fetch('/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            
+            if (result.poverty_probability !== undefined) {
+                const prob = (result.poverty_probability * 100).toFixed(2);
+                resultDiv.innerHTML = `ความน่าจะเป็นที่จะยากจน: <span style="color:red">${prob}%</span>`;
+            } else {
+                resultDiv.innerText = 'Error: ' + (result.error || 'Unknown error');
+            }
+        } catch (err) {
+            resultDiv.innerText = 'Error connecting to server';
+        }
+    }
+
+    document.getElementById('predictForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        await makePrediction();
+    });
+</script>
+
+</body>
+</html>
