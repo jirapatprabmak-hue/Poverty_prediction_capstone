@@ -1,8 +1,4 @@
-# บอก Git ว่า "อย่ามายุ่งกับโฟลเดอร์ Dataset นะ"
-/Dataset
 
-# กันเหนียว เผื่อมีไฟล์ csv หลุดออกมาข้างนอก
-*.csv
 *.pkl
 
 # Virtual Environment
