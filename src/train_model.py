@@ -95,7 +95,7 @@ expanded_features = [
     'income_friends_family_last_year',
     'reg_mm_acct',
     'country_I',
-    'age',
+    # 'age',  # Removed
     'female',
     'married'
 ]
@@ -200,89 +200,6 @@ xgb = XGBRegressor(
 xgb.fit(X_train, y_train, eval_set=[(X_valid, y_valid)], verbose=False)
 rmse_xgb, r2_xgb, f1_xgb = evaluate_model(xgb, X_valid, y_valid, "XGBoost")
 
-<<<<<<< HEAD
-print("\n[5/6] Training LightGBM (Fast Gradient Boosting)...")
-lgbm = lgb.LGBMRegressor(
-    n_estimators=1500,          # Increased trees
-    max_depth=8,                # Deeper trees
-    learning_rate=0.008,        # Lower learning rate
-    num_leaves=60,              # More leaves for complexity
-    subsample=0.85,
-    colsample_bytree=0.85,
-    min_child_samples=15,       # Allow smaller leaves
-    reg_alpha=0.05,
-    reg_lambda=0.8,
-    random_state=42,
-    n_jobs=-1,
-    verbose=-1
-)
-lgbm.fit(X_train, y_train,
-         eval_set=[(X_valid, y_valid)],
-         callbacks=[lgb.early_stopping(50, verbose=False)])
-rmse_lgbm, r2_lgbm, f1_lgbm = evaluate_model(lgbm, X_valid, y_valid, "LightGBM")
-
-print("\n[6/6] Training Gradient Boosting (Sklearn)...")
-gb = GradientBoostingRegressor(
-    n_estimators=500,
-    max_depth=6,
-    learning_rate=0.02,
-    subsample=0.8,
-    min_samples_split=4,
-    min_samples_leaf=2,
-    random_state=42,
-    verbose=0
-)
-gb.fit(X_train, y_train)
-rmse_gb, r2_gb, f1_gb = evaluate_model(gb, X_valid, y_valid, "Gradient Boosting")
-
-print("\n" + "="*60)
-print("CREATING ENSEMBLE STACK (Meta-Model)")
-print("="*60)
-
-# Create a stacking ensemble - combines all models
-print("\nTraining Stacking Ensemble...")
-base_models = [
-    ('rf', RandomForestRegressor(n_estimators=300, max_depth=25, random_state=42, n_jobs=-1)),
-    ('xgb', XGBRegressor(n_estimators=500, max_depth=7, learning_rate=0.01, random_state=42, n_jobs=-1)),
-    ('lgbm', lgb.LGBMRegressor(n_estimators=500, max_depth=7, learning_rate=0.01, random_state=42, n_jobs=-1, verbose=-1)),
-    ('gb', GradientBoostingRegressor(n_estimators=300, max_depth=6, learning_rate=0.02, random_state=42))
-]
-
-# Meta-model: Ridge regression to combine predictions
-stacking_model = StackingRegressor(
-    estimators=base_models,
-    final_estimator=Ridge(alpha=0.1),
-    cv=5,
-    n_jobs=-1
-)
-print("Fitting stacking ensemble (this may take a minute)...")
-stacking_model.fit(X_train, y_train)
-rmse_stack, r2_stack, f1_stack = evaluate_model(stacking_model, X_valid, y_valid, "Stacking Ensemble")
-
-# 4. Select Best Model
-print(f"\n{'='*60}")
-print(f"MODEL COMPARISON (Validation Set)")
-print(f"{'='*60}")
-print(f"Ridge Regression R²:     {r2_ridge:.4f}")
-print(f"Elastic Net R²:          {r2_elastic:.4f}")
-print(f"Random Forest R²:        {r2_rf:.4f}")
-print(f"XGBoost R²:              {r2_xgb:.4f}")
-print(f"LightGBM R²:             {r2_lgbm:.4f}")
-print(f"Gradient Boosting R²:    {r2_gb:.4f}")
-print(f"Stacking Ensemble R²:    {r2_stack:.4f}")
-
-# Select model with highest R²
-models = [
-<<<<<<< HEAD
-    (ridge, "Ridge Regression", r2_ridge, None),
-    (elastic, "Elastic Net", r2_elastic, None),
-    (rf, "Random Forest", r2_rf, None),
-    (xgb, "XGBoost", r2_xgb, None),
-    (lgbm, "LightGBM", r2_lgbm, None),
-    (gb, "Gradient Boosting", r2_gb, None),
-    (stacking_model, "Stacking Ensemble", r2_stack, None),
-    (None, "Weighted Ensemble", r2_weighted, {'xgb': xgb, 'lgbm': lgbm, 'gb': gb, 'weights': [w_xgb, w_lgbm, w_gb]})
-=======
 # 4. เลือกโมเดลที่ดีที่สุด
 # Compare R² scores and select the best one
 print(f"\n{'='*50}")
@@ -296,16 +213,6 @@ models = [
     (rf, "Random Forest", r2_rf),
     (xgb, "XGBoost", r2_xgb),
     (ridge, "Ridge Regression", r2_ridge)
->>>>>>> parent of 921b18e (adad)
-=======
-    (ridge, "Ridge Regression", r2_ridge),
-    (elastic, "Elastic Net", r2_elastic),
-    (rf, "Random Forest", r2_rf),
-    (xgb, "XGBoost", r2_xgb),
-    (lgbm, "LightGBM", r2_lgbm),
-    (gb, "Gradient Boosting", r2_gb),
-    (stacking_model, "Stacking Ensemble", r2_stack)
->>>>>>> parent of a23a8d4 (ad)
 ]
 best_model, best_name, best_r2 = max(models, key=lambda x: x[2])
 print(f"\nBest Model selected: {best_name} (R²: {best_r2:.4f})")
