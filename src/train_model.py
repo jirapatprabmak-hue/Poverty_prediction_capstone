@@ -338,16 +338,18 @@ print(f"XGBoost R²:              {r2_xgb:.4f}")
 print(f"LightGBM R²:             {r2_lgbm:.4f}")
 print(f"Gradient Boosting R²:    {r2_gb:.4f}")
 print(f"Stacking Ensemble R²:    {r2_stack:.4f}")
+print(f"Weighted Ensemble R²:    {r2_weighted:.4f}")
 
 # Select model with highest R²
 models = [
-    (ridge, "Ridge Regression", r2_ridge),
-    (elastic, "Elastic Net", r2_elastic),
-    (rf, "Random Forest", r2_rf),
-    (xgb, "XGBoost", r2_xgb),
-    (lgbm, "LightGBM", r2_lgbm),
-    (gb, "Gradient Boosting", r2_gb),
-    (stacking_model, "Stacking Ensemble", r2_stack)
+    (ridge, "Ridge Regression", r2_ridge, None),
+    (elastic, "Elastic Net", r2_elastic, None),
+    (rf, "Random Forest", r2_rf, None),
+    (xgb, "XGBoost", r2_xgb, None),
+    (lgbm, "LightGBM", r2_lgbm, None),
+    (gb, "Gradient Boosting", r2_gb, None),
+    (stacking_model, "Stacking Ensemble", r2_stack, None),
+    (None, "Weighted Ensemble", r2_weighted, {'xgb': xgb, 'lgbm': lgbm, 'gb': gb, 'weights': [w_xgb, w_lgbm, w_gb]})
 ]
 best_model, best_name, best_r2 = max(models, key=lambda x: x[2])
 print(f"\n🏆 Best Model: {best_name} (R²: {best_r2:.4f})")
