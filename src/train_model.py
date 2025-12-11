@@ -270,10 +270,10 @@ print(f"XGBoost R²:              {r2_xgb:.4f}")
 print(f"LightGBM R²:             {r2_lgbm:.4f}")
 print(f"Gradient Boosting R²:    {r2_gb:.4f}")
 print(f"Stacking Ensemble R²:    {r2_stack:.4f}")
-print(f"Weighted Ensemble R²:    {r2_weighted:.4f}")
 
 # Select model with highest R²
 models = [
+<<<<<<< HEAD
     (ridge, "Ridge Regression", r2_ridge, None),
     (elastic, "Elastic Net", r2_elastic, None),
     (rf, "Random Forest", r2_rf, None),
@@ -297,6 +297,15 @@ models = [
     (xgb, "XGBoost", r2_xgb),
     (ridge, "Ridge Regression", r2_ridge)
 >>>>>>> parent of 921b18e (adad)
+=======
+    (ridge, "Ridge Regression", r2_ridge),
+    (elastic, "Elastic Net", r2_elastic),
+    (rf, "Random Forest", r2_rf),
+    (xgb, "XGBoost", r2_xgb),
+    (lgbm, "LightGBM", r2_lgbm),
+    (gb, "Gradient Boosting", r2_gb),
+    (stacking_model, "Stacking Ensemble", r2_stack)
+>>>>>>> parent of a23a8d4 (ad)
 ]
 best_model, best_name, best_r2 = max(models, key=lambda x: x[2])
 print(f"\nBest Model selected: {best_name} (R²: {best_r2:.4f})")
