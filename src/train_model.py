@@ -4,7 +4,6 @@ import pickle
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import Ridge
-from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_squared_error, f1_score, r2_score
 try:
@@ -65,6 +64,7 @@ DATA_STD = float(poverty_prob.std())
 print(f"Data Statistics for Scaling:")
 print(f"  Min: {DATA_MIN:.4f}, Max: {DATA_MAX:.4f}")
 print(f"  Mean: {DATA_MEAN:.4f}, Std: {DATA_STD:.4f}")
+print(f"  Skewness: {poverty_prob.skew():.4f}")
 
 # Use ALL available features (excluding target)
 print("\nEngineering comprehensive feature set...")
@@ -142,6 +142,24 @@ df_features['log_income'] = np.log1p(df_features['total_income'])
 df_features['log_financial_activities'] = np.log1p(df['num_financial_activities_last_year'])
 df_features['log_borrowing'] = np.log1p(df['num_times_borrowed_last_year'])
 
+# 13. Advanced ratios and indicators
+df_features['digital_literacy_score'] = df_features['digital_capability'] * df_features['financial_literacy']
+df_features['economic_stability'] = df_features['total_income'] / (df_features['financial_stress'] + 1)
+df_features['financial_health'] = (df_features['total_savings'] + df_features['total_income']) / (df_features['borrowing_intensity'] + 1)
+df_features['resource_utilization'] = df['num_financial_activities_last_year'] * df_features['financial_inclusion_index']
+df_features['vulnerability_index'] = df_features['shock_exposure'] / (df_features['total_savings'] + 1)
+
+# 14. Interaction with household size if available
+if 'hh_size' in df.columns:
+    df_features['income_per_capita'] = df_features['total_income'] / (df['hh_size'] + 1)
+    df_features['savings_per_capita'] = df_features['total_savings'] / (df['hh_size'] + 1)
+    df_features['education_hh_interaction'] = df['education_level'] * df['hh_size']
+
+# 15. Square root transformations for heavily skewed features
+df_features['sqrt_income'] = np.sqrt(df_features['total_income'])
+df_features['sqrt_savings'] = np.sqrt(df_features['total_savings'])
+df_features['sqrt_borrowing'] = np.sqrt(df_features['borrowing_intensity'])
+
 # Include all engineered features
 selected_features = list(df_features.columns)
 
@@ -151,26 +169,49 @@ X = df_features
 y = df[target_col]
 print(f"Using {len(selected_features)} features (including interactions): {selected_features}")
 
-# 2. แบ่งข้อมูล 60% Train, 20% Validation, 20% Test
-X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.4, random_state=42)
-X_valid, X_test, y_valid, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+# Manual Z-Score Normalization on entire dataset BEFORE splitting
+print("\nApplying Manual Z-Score Normalization on entire dataset...")
+data_mean = X.mean()
+data_std = X.std()
 
-print(f"Data Split: Train={X_train.shape[0]}, Validation={X_valid.shape[0]}, Test={X_test.shape[0]}")
+# Normalize features: (X - mean) / std
+X_scaled = (X - data_mean) / data_std
+X_scaled = X_scaled.fillna(0).replace([np.inf, -np.inf], 0)
 
-# Standardize features - helps with model convergence and performance
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_valid_scaled = scaler.transform(X_valid)
-X_test_scaled = scaler.transform(X_test)
+# Normalize target variable as well
+target_mean = y.mean()
+target_std = y.std()
+y_scaled = (y - target_mean) / target_std
 
-# Convert back to DataFrame to maintain feature names for some models
-X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
-X_valid_scaled = pd.DataFrame(X_valid_scaled, columns=X_valid.columns, index=X_valid.index)
-X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
+print(f"Normalized features - Mean: {X_scaled.mean().mean():.6f}, Std: {X_scaled.std().mean():.6f}")
+print(f"Normalized target - Mean: {y_scaled.mean():.6f}, Std: {y_scaled.std():.6f}")
+
+# Store normalization parameters for later use
+train_mean = data_mean
+train_std = data_std
+
+
+y_bins = pd.qcut(y, q=4, labels=False, duplicates='drop')
+X_train_scaled, X_temp, y_train_scaled, y_temp, bins_train, bins_temp = train_test_split(
+    X_scaled, y_scaled, y_bins, test_size=0.3, random_state=42, stratify=y_bins
+)
+X_valid_scaled, X_test_scaled, y_valid_scaled, y_test_scaled = train_test_split(
+    X_temp, y_temp, test_size=0.5, random_state=42, stratify=bins_temp
+)
+
+print(f"Data Split: Train={X_train_scaled.shape[0]}, Validation={X_valid_scaled.shape[0]}, Test={X_test_scaled.shape[0]}")
+print(f"Normalized target distribution - Train mean: {y_train_scaled.mean():.6f}, Valid mean: {y_valid_scaled.mean():.6f}, Test mean: {y_test_scaled.mean():.6f}")
+
+print(f"Z-Score Normalization completed. Features and target normalized with entire dataset statistics")
 
 # ฟังก์ชันคำนวณ Metrics
-def evaluate_model(model, X, y_true, name):
-    y_pred = model.predict(X)
+def evaluate_model(model, X, y_true_scaled, name, target_mean, target_std):
+    y_pred_scaled = model.predict(X)
+    
+    # Denormalize predictions and true values to original scale
+    y_pred = y_pred_scaled * target_std + target_mean
+    y_true = y_true_scaled * target_std + target_mean
+    
     # Evaluate on original scale (0-1) for better metrics
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     r2 = r2_score(y_true, y_pred)
@@ -185,63 +226,72 @@ def evaluate_model(model, X, y_true, name):
 print("\nTraining Ridge Regression (Linear Model)...")
 # Test multiple alpha values for Ridge
 ridge = Ridge(alpha=0.0001, random_state=42)  # Very low regularization
-ridge.fit(X_train_scaled, y_train)
-rmse_ridge, r2_ridge, f1_ridge = evaluate_model(ridge, X_valid_scaled, y_valid, "Ridge Regression")
+ridge.fit(X_train_scaled, y_train_scaled)
+rmse_ridge, r2_ridge, f1_ridge = evaluate_model(ridge, X_valid_scaled, y_valid_scaled, "Ridge Regression", target_mean, target_std)
 
 print("\nTraining Random Forest...")
 # Improved hyperparameters for Random Forest
 rf = RandomForestRegressor(
-    n_estimators=300,        # More trees
+    n_estimators=500,        # More trees for stability
     random_state=42, 
     n_jobs=-1, 
-    max_depth=20,            # Deeper trees
-    min_samples_split=3,     # Allow smaller splits
-    min_samples_leaf=1       # Smaller leaf size
+    max_depth=25,            # Deeper trees
+    min_samples_split=2,     # Allow smaller splits
+    min_samples_leaf=1,      # Smaller leaf size
+    max_features='sqrt',     # Feature sampling strategy
+    bootstrap=True,          # Bootstrap sampling
+    oob_score=True          # Out-of-bag score for validation
 )
-rf.fit(X_train, y_train)  # RF doesn't need scaling
-rmse_rf, r2_rf, f1_rf = evaluate_model(rf, X_valid, y_valid, "Random Forest")
+rf.fit(X_train_scaled, y_train_scaled)  # Using z-score normalized data
+rmse_rf, r2_rf, f1_rf = evaluate_model(rf, X_valid_scaled, y_valid_scaled, "Random Forest", target_mean, target_std)
+print(f"Random Forest OOB Score: {rf.oob_score_:.4f}")
 
 print("\nTraining XGBoost (Optimized)...")
-# Highly optimized XGBoost configuration based on extensive tuning
+# Highly optimized XGBoost configuration for improved R²
 xgb = XGBRegressor(
-    n_estimators=1000,        # More boosting rounds with early stopping
+    n_estimators=2000,        # More boosting rounds
     random_state=42, 
     n_jobs=-1, 
-    max_depth=7,              # Optimal depth for this dataset
-    learning_rate=0.01,       # Balanced learning rate
-    subsample=0.8,            # Prevent overfitting
-    colsample_bytree=0.8,     # Feature sampling
-    colsample_bylevel=0.8,    # Additional feature sampling
-    min_child_weight=1,       # Minimum instance weight in leaf
-    gamma=0.05,               # Minimum loss reduction
-    reg_alpha=0.1,            # L1 regularization
-    reg_lambda=1.5,           # L2 regularization
+    max_depth=8,              # Deeper trees for complex patterns
+    learning_rate=0.008,      # Lower learning rate for better convergence
+    subsample=0.85,           # Slightly higher subsample
+    colsample_bytree=0.85,    # Feature sampling
+    colsample_bylevel=0.9,    # Additional feature sampling
+    min_child_weight=2,       # Slightly higher for regularization
+    gamma=0.01,               # Lower gamma for more splits
+    reg_alpha=0.05,           # L1 regularization
+    reg_lambda=2.0,           # Stronger L2 regularization
     tree_method='hist',       # Fast histogram-based training
-    max_bin=256,              # More bins for better splits
-    early_stopping_rounds=50  # Stop if no improvement
+    max_bin=512,              # More bins for finer splits
+    early_stopping_rounds=100 # More patience before stopping
 )
-# Train with early stopping
-xgb.fit(X_train, y_train, eval_set=[(X_valid, y_valid)], verbose=False)
-rmse_xgb, r2_xgb, f1_xgb = evaluate_model(xgb, X_valid, y_valid, "XGBoost Optimized")
+# Train with early stopping using z-score normalized data
+xgb.fit(X_train_scaled, y_train_scaled, eval_set=[(X_valid_scaled, y_valid_scaled)], verbose=False)
+rmse_xgb, r2_xgb, f1_xgb = evaluate_model(xgb, X_valid_scaled, y_valid_scaled, "XGBoost Optimized", target_mean, target_std)
 
 # Train additional models for stronger ensemble
 if LIGHTGBM_AVAILABLE:
     print("\nTraining LightGBM...")
     lgbm = LGBMRegressor(
-        n_estimators=1000,
+        n_estimators=2000,
         random_state=42,
         n_jobs=-1,
-        max_depth=7,
-        learning_rate=0.01,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=1,
-        reg_alpha=0.1,
-        reg_lambda=1.5,
+        max_depth=8,
+        learning_rate=0.008,
+        subsample=0.85,
+        colsample_bytree=0.85,
+        min_child_weight=2,
+        reg_alpha=0.05,
+        reg_lambda=2.0,
+        num_leaves=64,          # More leaves for complex patterns
+        min_data_in_leaf=15,    # Minimum data per leaf
+        feature_fraction=0.85,  # Feature sampling per tree
+        bagging_fraction=0.85,  # Row sampling
+        bagging_freq=5,         # Bagging frequency
         verbose=-1
     )
-    lgbm.fit(X_train, y_train, eval_set=[(X_valid, y_valid)], callbacks=[])
-    rmse_lgbm, r2_lgbm, f1_lgbm = evaluate_model(lgbm, X_valid, y_valid, "LightGBM")
+    lgbm.fit(X_train_scaled, y_train_scaled, eval_set=[(X_valid_scaled, y_valid_scaled)], callbacks=[])
+    rmse_lgbm, r2_lgbm, f1_lgbm = evaluate_model(lgbm, X_valid_scaled, y_valid_scaled, "LightGBM", target_mean, target_std)
 else:
     print("\nTraining Gradient Boosting...")
     lgbm = GradientBoostingRegressor(
@@ -253,42 +303,95 @@ else:
         min_samples_split=5,
         min_samples_leaf=2
     )
-    lgbm.fit(X_train, y_train)
-    rmse_lgbm, r2_lgbm, f1_lgbm = evaluate_model(lgbm, X_valid, y_valid, "Gradient Boosting")
+    lgbm.fit(X_train_scaled, y_train_scaled)
+    rmse_lgbm, r2_lgbm, f1_lgbm = evaluate_model(lgbm, X_valid_scaled, y_valid_scaled, "Gradient Boosting", target_mean, target_std)
 
 # 4. Create Ensemble Stacking (combining predictions for better performance)
 print("\n" + "="*50)
 print("Creating Ensemble Model (Stacking)...")
 print("="*50)
 
-# Get predictions from all models on validation set
+# Get predictions from all models on validation set (all using z-score normalized data)
 pred_ridge_valid = ridge.predict(X_valid_scaled)
-pred_rf_valid = rf.predict(X_valid)
-pred_xgb_valid = xgb.predict(X_valid)
-pred_lgbm_valid = lgbm.predict(X_valid)
+pred_rf_valid = rf.predict(X_valid_scaled)
+pred_xgb_valid = xgb.predict(X_valid_scaled)
+pred_lgbm_valid = lgbm.predict(X_valid_scaled)
 
 # Stack predictions as new features
 X_valid_stacked = np.column_stack([pred_ridge_valid, pred_rf_valid, pred_xgb_valid, pred_lgbm_valid])
 
-# Train a meta-model (Ridge) on stacked predictions
+# Use weighted average based on individual model performance (inverse of RMSE)
 from sklearn.linear_model import Ridge as MetaRidge
+
+# Calculate weights based on validation R² scores (better models get higher weights)
+weights = np.array([r2_ridge, r2_rf, r2_xgb, r2_lgbm])
+weights = np.maximum(weights, 0)  # Ensure non-negative
+weights = weights / weights.sum()  # Normalize to sum to 1
+print(f"Model weights - Ridge: {weights[0]:.3f}, RF: {weights[1]:.3f}, XGB: {weights[2]:.3f}, LGBM: {weights[3]:.3f}")
+
+# Weighted ensemble prediction
+pred_ensemble_valid_weighted = (pred_ridge_valid * weights[0] + 
+                                 pred_rf_valid * weights[1] + 
+                                 pred_xgb_valid * weights[2] + 
+                                 pred_lgbm_valid * weights[3])
+
+# Also train meta-model for comparison
 meta_model = MetaRidge(alpha=0.1, random_state=42)
-meta_model.fit(X_valid_stacked, y_valid)
+meta_model.fit(X_valid_stacked, y_valid_scaled)
+pred_ensemble_valid_meta = meta_model.predict(X_valid_stacked)
 
-# Get stacked predictions for test set
+# Denormalize predictions for evaluation
+y_valid_original = y_valid_scaled * target_std + target_mean
+pred_weighted_original = pred_ensemble_valid_weighted * target_std + target_mean
+pred_meta_original = pred_ensemble_valid_meta * target_std + target_mean
+
+# Compare weighted vs meta-model
+rmse_weighted = np.sqrt(mean_squared_error(y_valid_original, pred_weighted_original))
+r2_weighted = r2_score(y_valid_original, pred_weighted_original)
+rmse_meta = np.sqrt(mean_squared_error(y_valid_original, pred_meta_original))
+r2_meta = r2_score(y_valid_original, pred_meta_original)
+
+print(f"Weighted Ensemble R²: {r2_weighted:.4f}")
+print(f"Meta-Model Ensemble R²: {r2_meta:.4f}")
+
+# Use the better ensemble method
+if r2_weighted > r2_meta:
+    print("Using Weighted Ensemble")
+    use_weighted = True
+    pred_ensemble_valid = pred_ensemble_valid_weighted
+else:
+    print("Using Meta-Model Ensemble")
+    use_weighted = False
+    pred_ensemble_valid = pred_ensemble_valid_meta
+
+# Get stacked predictions for test set (all using z-score normalized data)
 pred_ridge_test = ridge.predict(X_test_scaled)
-pred_rf_test = rf.predict(X_test)
-pred_xgb_test = xgb.predict(X_test)
-pred_lgbm_test = lgbm.predict(X_test)
-X_test_stacked = np.column_stack([pred_ridge_test, pred_rf_test, pred_xgb_test, pred_lgbm_test])
-pred_ensemble_test = meta_model.predict(X_test_stacked)
+pred_rf_test = rf.predict(X_test_scaled)
+pred_xgb_test = xgb.predict(X_test_scaled)
+pred_lgbm_test = lgbm.predict(X_test_scaled)
 
-# Evaluate ensemble
-rmse_ensemble = np.sqrt(mean_squared_error(y_test, pred_ensemble_test))
-r2_ensemble = r2_score(y_test, pred_ensemble_test)
-y_pred_bin = (pred_ensemble_test >= 0.5).astype(int)
-y_test_bin = (y_test >= 0.5).astype(int)
+if use_weighted:
+    pred_ensemble_test = (pred_ridge_test * weights[0] + 
+                          pred_rf_test * weights[1] + 
+                          pred_xgb_test * weights[2] + 
+                          pred_lgbm_test * weights[3])
+else:
+    X_test_stacked = np.column_stack([pred_ridge_test, pred_rf_test, pred_xgb_test, pred_lgbm_test])
+    pred_ensemble_test = meta_model.predict(X_test_stacked)
+
+# Denormalize test predictions and true values
+y_test_original = y_test_scaled * target_std + target_mean
+pred_ensemble_test_original = pred_ensemble_test * target_std + target_mean
+
+# Evaluate ensemble on test set
+rmse_ensemble = np.sqrt(mean_squared_error(y_test_original, pred_ensemble_test_original))
+r2_ensemble = r2_score(y_test_original, pred_ensemble_test_original)
+y_pred_bin = (pred_ensemble_test_original >= 0.5).astype(int)
+y_test_bin = (y_test_original >= 0.5).astype(int)
 f1_ensemble = f1_score(y_test_bin, y_pred_bin)
+
+# Use the validation R² from the chosen ensemble method
+r2_ensemble_valid = r2_weighted if use_weighted else r2_meta
 
 print(f"\n{'='*50}")
 print(f"Model Comparison on Validation Set:")
@@ -296,69 +399,36 @@ print(f"Ridge R²: {r2_ridge:.4f}")
 print(f"Random Forest R²: {r2_rf:.4f}")
 print(f"XGBoost R²: {r2_xgb:.4f}")
 print(f"{'LightGBM' if LIGHTGBM_AVAILABLE else 'GradientBoosting'} R²: {r2_lgbm:.4f}")
-print(f"Ensemble R²: {r2_ensemble:.4f}")
+print(f"Ensemble R²: {r2_ensemble_valid:.4f}")
+print(f"{'='*50}")
+print(f"Test Set Results:")
+print(f"Ensemble Test R²: {r2_ensemble:.4f}")
 
-# Compare all models including ensemble
-models = [
-    (xgb, "XGBoost", r2_xgb),
-    (lgbm, "LightGBM" if LIGHTGBM_AVAILABLE else "GradientBoosting", r2_lgbm),
-    (rf, "Random Forest", r2_rf),
-    (ridge, "Ridge Regression", r2_ridge),
-    (None, "Ensemble Stacking", r2_ensemble)  # Ensemble needs special handling
-]
+# Force XGBoost as the best model
+best_model = xgb
+best_name = "XGBoost"
+best_r2 = r2_xgb
 
-# Select best individual model
-best_individual_model, best_individual_name, best_individual_r2 = max(models[:4], key=lambda x: x[2])
-
-# Decide between best individual and ensemble
-if r2_ensemble > best_individual_r2:
-    best_model = "ensemble"
-    best_name = "Ensemble Stacking"
-    best_r2 = r2_ensemble
-    print(f"\nBest Model: {best_name} (Validation R²: {best_r2:.4f})")
-else:
-    best_model = best_individual_model
-    best_name = best_individual_name
-    best_r2 = best_individual_r2
-    print(f"\nBest Model: {best_name} (Validation R²: {best_r2:.4f})")
+print(f"\nUsing XGBoost as selected model (Validation R²: {r2_xgb:.4f})")
 print(f"{'='*50}\n")
 
 # 5. ทดสอบกับ Test Set
 print("\nEvaluating on Test Set...")
-if best_model == "ensemble":
-    print(f"[{best_name}] RMSE: {rmse_ensemble:.4f}, R²: {r2_ensemble:.4f}, F1: {f1_ensemble:.4f}")
-else:
-    if best_name == "Ridge Regression":
-        evaluate_model(best_model, X_test_scaled, y_test, best_name)
-    else:
-        evaluate_model(best_model, X_test, y_test, best_name)
+evaluate_model(best_model, X_test_scaled, y_test_scaled, best_name, target_mean, target_std)
 
-# 6. บันทึกโมเดล
-if best_model == "ensemble":
-    # Save all models and meta-model for ensemble
-    ensemble_package = {
-        'type': 'ensemble',
-        'ridge': ridge,
-        'random_forest': rf,
-        'xgboost': xgb,
-        'lgbm': lgbm,
-        'meta_model': meta_model,
-        'scaler': scaler
-    }
-    with open('best_model.pkl', 'wb') as f:
-        pickle.dump(ensemble_package, f)
-    print("Ensemble model package saved to 'best_model.pkl'")
-else:
-    # Save individual model
-    model_package = {
-        'type': 'individual',
-        'model': best_model,
-        'model_name': best_name,
-        'scaler': scaler if best_name == "Ridge Regression" else None
-    }
-    with open('best_model.pkl', 'wb') as f:
-        pickle.dump(model_package, f)
-    print(f"{best_name} saved to 'best_model.pkl'")
+# 6. บันทึกโมเดล (XGBoost)
+model_package = {
+    'type': 'individual',
+    'model': best_model,
+    'model_name': best_name,
+    'train_mean': train_mean.to_dict(),
+    'train_std': train_std.to_dict(),
+    'target_mean': float(target_mean),
+    'target_std': float(target_std)
+}
+with open('best_model.pkl', 'wb') as f:
+    pickle.dump(model_package, f)
+print(f"{best_name} saved to 'best_model.pkl'")
 
 # บันทึกรายชื่อ Feature ไว้ใช้กับเว็บ
 with open('model_features.pkl', 'wb') as f:
